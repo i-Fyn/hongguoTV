@@ -889,10 +889,47 @@ constructor(
             "use_os_player" to "0", "video_platform" to "1024", "source" to "0",
             "from_video_id" to "",
         )
+        fun modelFrom(text: String): JSONObject? {
+            val root = runCatching { JSONObject(text) }.getOrNull()
+            if (root == null) { trace.rejected(); return null }
+            if (strict) PlaybackModels.checkStatus(root)
+            val code = root.optInt("code", root.optInt("Code", -1))
+            if (code != 0) { trace.rejected(code); return null }
+            val data = root.optJSONObject("data") ?: return null
+            val rows = data.optJSONObject("video_model_data") ?: data
+            val row =
+                rows.optJSONObject(id)
+                    ?: if (strict) null else rows.keys().asSequence().mapNotNull { rows.optJSONObject(it) }.firstOrNull()
+            val model = PlaybackModels.objectValue(row?.opt("video_model")) ?: return null
+            if (!strict && (model.optJSONArray("video_list")?.length() ?: 0) == 0) return null
+            return JSONObject().put("video_model", model)
+        }
         // One preferred request; the legacy path retains the bounded cross-host retry budget.
         for (host in listOf(PlayRetryPlan.hosts.first())) {
-            val request = if (mobileV5) MobilePlayback.videoTabRequest(id, identity.values, host, clock())
-            else playbackRequest(
+            if (mobileV5) {
+                val signed = MobilePlayback.videoTabRequest(id, identity.values, host, clock())
+                val model = try {
+                    modelFrom(fetchPlaybackModel(signed, transport, trace, PlaybackRequestTrace.Stage.GET))
+                } catch (empty: EmptyPlaybackResponseException) {
+                    // 部分集数所有签名形态都回 200/0B，而同一身份的无签名 GET 仍能拿到模型。
+                    RequestScope.ensureActive()
+                    val unsigned = MobilePlayback.unsignedVideoTabRequest(
+                        id, identity.values, host, clock(), identity.cookie,
+                    )
+                    try {
+                        modelFrom(
+                            fetchPlaybackModel(
+                                unsigned, transport, trace, PlaybackRequestTrace.Stage.GET,
+                            )
+                        )
+                    } catch (_: EmptyPlaybackResponseException) {
+                        throw empty
+                    }
+                }
+                if (model != null) return model
+                continue
+            }
+            val request = playbackRequest(
                 "https://$host/reading/bookapi/video_tab/multi_video_model/v1/",
                 identity, extra,
             )
@@ -906,19 +943,8 @@ constructor(
                     if (strict) throw problem
                     continue
                 }
-            val root = runCatching { JSONObject(text) }.getOrNull()
-            if (root == null) { trace.rejected(); continue }
-            if (strict) PlaybackModels.checkStatus(root)
-            val code = root.optInt("code", root.optInt("Code", -1))
-            if (code != 0) { trace.rejected(code); continue }
-            val data = root.optJSONObject("data") ?: continue
-            val rows = data.optJSONObject("video_model_data") ?: data
-            val row =
-                rows.optJSONObject(id)
-                    ?: if (strict) null else rows.keys().asSequence().mapNotNull { rows.optJSONObject(it) }.firstOrNull()
-            val model = PlaybackModels.objectValue(row?.opt("video_model")) ?: continue
-            if (!strict && (model.optJSONArray("video_list")?.length() ?: 0) == 0) continue
-            return JSONObject().put("video_model", model)
+            val model = modelFrom(text)
+            if (model != null) return model
         }
         return null
     }

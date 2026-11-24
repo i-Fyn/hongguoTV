@@ -8,18 +8,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SignerV5Test {
-    @Test fun matchesVerifiedPlaybackWireContractWithSyntheticIdentity() {
-        val fixture = JSONObject(javaClass.getResource("/signing-v5-playback-312.json")!!.readText())
-        val values = fixture.getJSONObject("identity")
-        val order = fixture.getJSONArray("queryOrder")
-        val identity = (0 until order.length()).associate { order.getString(it).let { key -> key to values.getString(key) } }
-        val signer = Signer({ 1800000000000 }, identity, { 0.5 }, "synthetic", mobileV5 = true)
-        val actual = signer.signPlayback("https://example.test/model", identity,
-            decode64(fixture.getString("body")), 1800000000000)
-        assertEquals(fixture.getString("url"), actual.url)
-        val expected = fixture.getJSONObject("headers")
-        assertEquals(expected.keys().asSequence().toSet(), actual.headers.keys)
-        expected.keys().forEach { assertEquals(it, expected.getString(it), actual.headers[it]) }
+    @Test fun matchesOfficialV5EnvelopeVectors() {
+        val rows = JSONArray(javaClass.getResource("/signing-v5-envelope.json")!!.readText())
+        for (i in 0 until rows.length()) {
+            val row = rows.getJSONObject(i)
+            val query = row.getString("url").toHttpUrl()
+            val who = query.queryParameterNames.associateWith { query.queryParameter(it)!! }
+            val signer = Signer(
+                clock = { 1800000000000 }, random = { 0.5 }, processNonce = "synthetic",
+                mobileV5 = true,
+                v5Seed = Signer.V5Seed(
+                    Integer.MIN_VALUE, 105, 11000, row.getLong("ts"),
+                    Integer.MIN_VALUE, Integer.MIN_VALUE,
+                ),
+            )
+            assertEquals("row $i", row.getString("medusa"),
+                signer.probeMedusa(row.getString("url"), hex(row.getString("body")), row.getInt("ts"), who))
+            assertEquals("row $i", row.getString("helios"), signer.helios(row.getInt("ts"), Integer.MIN_VALUE))
+        }
     }
 
     @Test fun matchesCarrierVectorsAcrossAllFourTimestampVariants() {

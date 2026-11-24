@@ -5,6 +5,7 @@ package com.hongguotv.core
 internal object V5Constants {
     val magic = hex("2d4b4fca49750d433fb5ae2c226dcc56")
     const val license = "646637794"
+    val flags = hex("4480000000000000")
     // Wire field 21 from successful 7.4.5.32 App/SDK requests. A same-request
     // A/B with 377 returned 200/0B; 312 restored both issue #102 samples.
     // Its internal SDK meaning is unknown; it is not a device/session value.

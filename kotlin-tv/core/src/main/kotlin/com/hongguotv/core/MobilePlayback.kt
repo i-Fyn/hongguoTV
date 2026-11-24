@@ -36,12 +36,18 @@ internal object MobilePlayback {
     }
 
     private fun query(device: Map<String, String>, currentApp: Boolean = false): Map<String, String> =
-        if (currentApp) linkedMapOf("aid" to "8662", "app_name" to "novelread",
-            "version_code" to "74532", "version_name" to "7.4.5.32", "update_version_code" to "74532",
-            "manifest_version_code" to "74532", "os" to "android", "ssmix" to "a",
-            "channel" to "update_64", "device_platform" to "android", "device_type" to "25053RT47C",
-            "device_brand" to "Redmi", "os_version" to "16", "os_api" to "36",
-            "ac" to "wifi", "language" to "zh", "host_abi" to "arm64-v8a",
+        (if (currentApp) linkedMapOf(
+            "ac" to "wifi", "aid" to "8662", "app_name" to "novelread",
+            "channel" to "vivo_8662_64", "compliance_status" to "0",
+            "device_platform" to "android", "device_type" to "PGT-AN10", "device_brand" to "HONOR",
+            "dragon_device_type" to "phone", "dpi" to "280", "host_abi" to "arm64-v8a",
+            "is_android_pad_screen" to "0", "language" to "zh",
+            "manifest_version_code" to "74332", "need_personal_recommend" to "1",
+            "os" to "android", "os_api" to "31", "os_version" to "12",
+            "player_so_load" to "1", "pv_player" to "74332",
+            "resolution" to "1920*1080", "rom_version" to "V417IR+release-keys",
+            "ssmix" to "a", "update_version_code" to "74332",
+            "version_code" to "74332", "version_name" to "7.4.3.32",
             "iid" to device.getValue("iid"), "cdid" to device.getValue("cdid"),
             "device_id" to device.getValue("device_id")) else
         linkedMapOf("aid" to "8662", "app_name" to "novelread",
@@ -49,7 +55,9 @@ internal object MobilePlayback {
             "channel" to "vivo_8662_64", "device_platform" to "android",
             "device_type" to "PGT-AN10", "os_version" to "12", "update_version_code" to "74332",
             "iid" to device.getValue("iid"), "cdid" to device.getValue("cdid"),
-            "device_id" to device.getValue("device_id"))
+            "device_id" to device.getValue("device_id"))) +
+            (device["klink_egdi"]?.takeIf { it.isNotBlank() }?.let { mapOf("klink_egdi" to it) }
+                ?: emptyMap())
 
     /** The player GET also requires v5, including MD5(empty) rather than a zero body digest.
      * Wire profile verified against hongguo-drama 92df757 and hongguo-tv 9e7386f.
@@ -80,6 +88,28 @@ internal object MobilePlayback {
             }
     }
 
+    /** Last-resort tab GET without signatures, matching the official APK's anonymous read path.
+     * Some episodes return 200/0B for every signed form while this identity-scoped GET still
+     * returns the model, so it is only tried after a signed-empty response.
+     */
+    fun unsignedVideoTabRequest(id: String, device: Map<String, String>, host: String, now: Long,
+                                cookie: String): Request.Builder {
+        require(id.matches(Regex("[0-9]{1,30}")))
+        RequestScope.ensureActive()
+        val values = device + linkedMapOf(
+            "video_id" to id, "video_id_type" to "0", "device_level" to "1",
+            "need_all_video_definition" to "1", "need_mp4_align" to "0", "use_os_player" to "0",
+            "video_platform" to "1024", "source" to "0", "from_video_id" to "",
+            "_rticket" to now.toString(),
+        )
+        val url = "https://$host/reading/bookapi/video_tab/multi_video_model/v1/"
+            .toHttpUrl().newBuilder().apply { values.forEach { (k, v) -> addQueryParameter(k, v) } }.build()
+        return Request.Builder().url(url).get()
+            .header("User-Agent", "com.phoenix.read/71532 (Linux; U; Android 9; SM-N9860; Build/PQ3A.190705.10241111;tt-ok/3.12.13.20)")
+            .header("Accept", "application/json; charset=utf-8")
+            .apply { if (cookie.isNotBlank()) header("Cookie", cookie) }
+    }
+
     fun ladder(
         id: String,
         device: Map<String, String>,
@@ -92,23 +122,20 @@ internal object MobilePlayback {
         RequestScope.ensureActive()
         val currentApp = signer.currentAppProtocol
         val query = query(device, currentApp) + ("_rticket" to now.toString())
-        val origin = host ?: if (currentApp) "reading.snssdk.com" else PRIMARY_MODEL_HOST
-        val endpoint = if (currentApp) "https://$origin/novel/player/multi_video_model/preload/v1"
-            else "https://$origin/novel/player/multi_video_model/player/v1"
+        val origin = host ?: if (currentApp) PRIMARY_MODEL_HOST else PRIMARY_MODEL_HOST
+        val endpoint = "https://$origin/novel/player/multi_video_model/player/v1"
         val url = endpoint
             .toHttpUrl().newBuilder().apply { query.forEach { (k,v) -> addQueryParameter(k,v) } }.build()
         // TV uses platform decoders, not the official app's bytevc2 decoder.
-        // Level 3 can return only bytevc2; level 1 negotiates compatible renditions.
+        // Level 1 negotiates compatible renditions (bytevc1/h264) for the same episode.
         val payload = JSONObject("""{"biz_param":{"detail_page_version":0,"device_level":1,"disable_digg_stat":false,"disable_video_relate_book":false,"need_all_video_definition":true,"need_mp4_align":false,"use_os_player":false,"use_server_dns":false,"video_platform":1024},"mixed_video_id_map":{"1004":["$id"]},"dr_scene":"player"}""")
-        if (currentApp) {
-            payload.getJSONObject("biz_param").put("device_level", 2)
-            payload.put("dr_scene", "preload")
-        }
+        val raw = payload.toString().toByteArray(Charsets.UTF_8)
         val output = ByteArrayOutputStream()
-        GZIPOutputStream(output).use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+        GZIPOutputStream(output).use { it.write(raw) }
         val bytes = output.toByteArray()
         val request = Request.Builder().url(url)
-            .header("User-Agent", if (currentApp) System.getProperty("http.agent", "okhttp/4.12.0") else
+            .header("User-Agent", if (currentApp)
+                "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)" else
                 "com.phoenix.read/73932 (Linux; U; Android 12; zh_CN_#Hans; PGT-AN10; Build/V417IR;tt-ok/3.12.13.20)")
             .header("Accept", "application/json").header("Content-Encoding", "gzip")
             .header("x-ss-stub", MessageDigest.getInstance("MD5").digest(bytes).joinToString("") { "%02X".format(it) })

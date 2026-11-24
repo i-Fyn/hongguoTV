@@ -52,13 +52,13 @@ class MobilePlaybackTest {
             val request = chain.request()
             requests++
             val payload = if (requests == 1) {
-                assertEquals("reading.snssdk.com", request.url.host)
-                assertEquals("74532", request.url.queryParameter("version_code"))
+                assertEquals("api5-normal-sinfonlinea.fqnovel.com", request.url.host)
+                assertEquals("74332", request.url.queryParameter("version_code"))
                 assertEquals("local-test-only", request.header("X-Medusa"))
                 assertArrayEquals(signedBody, Buffer().apply { request.body!!.writeTo(this) }.readByteArray())
                 val body = JSONObject(GZIPInputStream(signedBody.inputStream()).reader().readText())
-                assertEquals("preload", body.getString("dr_scene"))
-                assertEquals(2, body.getJSONObject("biz_param").getInt("device_level"))
+                assertEquals("player", body.getString("dr_scene"))
+                assertEquals(1, body.getJSONObject("biz_param").getInt("device_level"))
                 apiModel.toString()
             } else {
                 assertEquals("vas.example.org", request.url.host)
@@ -205,7 +205,11 @@ class MobilePlaybackTest {
         assertEquals("mobile-model=200/0B", (primary.suppressed.single() as PlaybackDiagnosticException).detail)
         val tab = error.suppressed.filterIsInstance<PlaybackDiagnosticException>().single()
         assertTrue(tab.detail.startsWith("video-tab-empty ") && tab.detail.contains("200/0B"))
-        assertEquals(listOf("POST", "GET"), requests.map { it.method })
+        // 签名 GET 空响应后，再用同一身份发一次无签名 GET 才放弃。
+        assertEquals(listOf("POST", "GET", "GET"), requests.map { it.method })
+        assertNotNull(requests[1].header("x-medusa"))
+        assertNull(requests[2].header("x-medusa"))
+        assertNull(requests[2].header("x-khronos"))
     }
 
     @Test fun emptyPrimaryDefersBackgroundWorkAcrossRepositoriesUntilRecoveryOrExpiry() {
@@ -274,7 +278,7 @@ class MobilePlaybackTest {
         assertEquals("https://example.org/video", rendition.url)
         assertEquals(
             listOf(
-                "POST" to "reading.snssdk.com",
+                "POST" to "api5-normal-sinfonlinea.fqnovel.com",
                 "GET" to "api5-normal-sinfonlineb.fqnovel.com",
                 "POST" to "api5-normal-sinfonlineb.fqnovel.com",
             ),

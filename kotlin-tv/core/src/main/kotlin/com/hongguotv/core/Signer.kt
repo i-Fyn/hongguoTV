@@ -17,7 +17,14 @@ internal class Signer(
         .withoutPadding()
         .encodeToString(ByteArray(18).also(java.security.SecureRandom()::nextBytes)),
     private val mobileV5: Boolean = false,
+    // 仅测试对拍使用：固定官方 v5 信封里的随机/时间分量，逐字节比对参考实现。
+    private val v5Seed: V5Seed? = null,
 ) {
+    data class V5Seed(
+        val messageRand: Int, val envLaunch: Int, val envPid: Int,
+        val nowUnix: Long, val signNonce: Int, val packedRand: Int,
+    )
+
     private val processStarted: Long = clock()
     data class Request(val url: String, val headers: Map<String, String>, val body: ByteArray?)
 
@@ -104,8 +111,8 @@ internal class Signer(
 
     fun hashF13(query: ByteArray, body: ByteArray, ts: Int): ByteArray {
         val index = (iv(query, body, ts) and 15) / 3
-        require(if (mobileV5) (iv(query, body, ts) and 15) == 12
-            else (iv(query, body, ts) and 15) % 3 == 0) { "Unsupported hash branch" }
+        // v5 由 signPlayback 先抖动 _rticket 保证 branch=12；此处允许直接计算供对拍使用。
+        if (!mobileV5) require((iv(query, body, ts) and 15) % 3 == 0) { "Unsupported hash branch" }
         val ivV1 =
             if (mobileV5) 0x9d4a97c2.toInt() else intArrayOf(
                 0xc4a78580.toInt(),
@@ -372,37 +379,58 @@ internal class Signer(
 
     private fun medusaV5(url: String, body: ByteArray?, ts: Int, who: Map<String, String>): String {
         val query = sm3(url.substringAfter('?').toByteArray(Charsets.UTF_8))
-        val f13 = hashF13(query, body?.let { digest("MD5", it) } ?: ByteArray(16), ts)
-        val flags = ByteArray(8)
-        val version = who.getValue("version_name")
+        val emptyMd5 = digest("MD5", ByteArray(0))
+        val f13 = hashF13(query, body?.let { digest("MD5", it) } ?: emptyMd5, ts)
+        val version = who["version_name"] ?: "7.4.3.32"
+        val osVersion = who["os_version"] ?: "12"
+        val deviceType = who["device_type"] ?: "PGT-AN10"
+        val channel = who["channel"] ?: "vivo_8662_64"
+        val brand = who["device_brand"] ?: "HONOR"
+        val deviceId = who["device_id"] ?: ""
+        val token = secDeviceToken(processNonce)
         val deviceInfo = proto(
-            f(1, 1, "sint"), f(2, 2, "sint"), f(3, "8662"), f(4, who.getValue("device_id")),
-            f(5, processNonce), f(6, "!noperm!"), f(12, "Asia/Shanghai,8"), f(13, "zh_CN"),
-            f(22, who.getValue("os_version")), f(25, processStarted, "sint"),
-            f(30, who.getValue("device_type")), f(31, "HONOR"),
-            f(32, who.getValue("device_type")), f(34, "HONOR"),
+            f(1, 1, "sint"), f(2, 2, "sint"), f(3, "8662"), f(4, deviceId), f(5, token),
+            f(6, "!noperm!"), f(7, -888888, "sint"), f(8, -888888, "sint"),
+            f(9, 3, "sint"), f(10, -888888, "sint"), f(11, "!notset!"),
+            f(12, "Asia/Shanghai,8"), f(13, "zh_CN"), f(14, 4, "sint"),
+            f(16, 0f, "float"), f(17, 0f, "float"), f(18, 0f, "float"),
+            f(19, 0f, "float"), f(20, 0f, "float"), f(21, 0f, "float"),
+            f(22, osVersion), f(23, 41, "sint"), f(24, 36, "sint"),
+            f(25, processStarted, "sint"), f(26, processStarted, "sint"),
+            f(27, processStarted, "sint"), f(28, (v5Seed?.nowUnix ?: (clock() / 1000)) * 1000, "sint"),
+            f(29, -1, "sint"), f(30, deviceType), f(31, brand), f(32, deviceType),
+            f(33, deviceType), f(34, brand), f(35, brand), f(36, brand), f(38, 31, "sint"),
         )
-        val env = proto(f(6, "v04.10.03.04-bugfix"), f(8, who.getValue("channel")),
-            f(12, deviceInfo), f(14, version))
+        val envSub = proto(f(1, ts, "sint"), f(2, -2, "sint"), f(4, 200, "sint"))
+        val env = proto(
+            f(1, v5Seed?.envLaunch ?: (100 + rand().let { if (it < 0) -it else it } % 21), "sint"),
+            f(2, 247235599, "sint"), f(3, 247235596, "sint"), f(5, 7, "sint"),
+            f(6, "v04.10.03.04-bugfix"),
+            f(7, v5Seed?.envPid ?: (10001 + rand().let { if (it < 0) -it else it } % 2000), "sint"),
+            f(8, channel), f(12, deviceInfo), f(13, envSub), f(14, version),
+        )
+        val nested = proto(
+            f(1, 305, "sint"), f(2, 4, "sint"), f(3, 694367, "sint"), f(5, 1621072674, "sint"),
+        )
         val message = proto(
-            f(1, V5Constants.magic), f(2, 5, "sint"), f(3, unsigned(rand()), "sint"),
-            f(4, "8662"), f(5, who.getValue("device_id")), f(6, V5Constants.license),
+            f(1, V5Constants.magic), f(2, 5, "sint"), f(3, unsigned(v5Seed?.messageRand ?: rand()), "sint"),
+            f(4, "8662"), f(5, deviceId), f(6, V5Constants.license),
             f(7, version), f(8, "v04.10.03-ml-android"), f(9, 0x040a0300, "sint"),
-            f(10, flags), f(12, ts, "sint"), f(13, f13), f(14, query.copyOf(6)),
-            f(15, proto(f(1, 1, "sint"), f(2, 1, "sint"), f(3, 1, "sint"), f(5, 1, "sint"))),
-            f(17, ts, "sint"), f(20, "none"), f(21, V5Constants.field21, "sint"), f(23, env),
+            f(10, V5Constants.flags), f(12, ts, "sint"), f(13, f13), f(14, query.copyOf(6)),
+            f(15, nested), f(16, token), f(17, ts, "sint"), f(20, "none"),
+            f(21, V5Constants.field21, "sint"), f(23, env),
             f(24, """{"cmr":16777216,"cmr2":16777216,"un_h":11,"vpn":0,"kd":0,"dyn":"","do":1,"tk":true}"""),
         )
-        val nonce = rand()
+        val nonce = v5Seed?.signNonce ?: rand()
         val key = V5Constants.signKey
         val hash = sm3(key + le32(nonce) + key)
         val high = (nonce ushr 16) and 255
         val seed = le32((((high shl 11) or (nonce ushr 24)) xor (high ushr 5) xor high).inv())
-        val transformed = (flags + xmxor(message, hash)).reversedArray()
+        val transformed = (V5Constants.flags + xmxor(message, hash)).reversedArray()
         for (i in transformed.indices) transformed[i] =
             (transformed[i].u() xor seed[i.inv() and 3].u()).toByte()
         val check = 0x18000001 or ((query[0].u() and 63) shl 14) or ((f13[0].u() and 63) shl 8)
-        val packed = byteArrayOf(0xca.toByte()) + le32(rand()) + le32(check) + transformed +
+        val packed = byteArrayOf(0xca.toByte()) + le32(v5Seed?.packedRand ?: rand()) + le32(check) + transformed +
             byteArrayOf((nonce ushr 16).toByte(), (nonce ushr 24).toByte())
         val encrypted = AesV3(digest("MD5", key.copyOfRange(0, 16)), ts, v5 = true)
             .encrypt(packed, digest("MD5", key.copyOfRange(16, 32)))
@@ -411,8 +439,15 @@ internal class Signer(
         return (prefix + byteArrayOf(nonce.toByte(), (nonce ushr 8).toByte(), 0, 1) + encrypted).base64()
     }
 
-    fun helios(ts: Int): String {
-        val random = rand()
+    internal fun probeMedusa(url: String, body: ByteArray?, ts: Int, who: Map<String, String>) =
+        medusaV5(url, body, ts, who)
+
+    private fun secDeviceToken(nonce: String): String {
+        if (nonce.length == 25 && nonce[0] == 'A') return nonce
+        return "A" + nonce.take(24).padEnd(24, 'A')
+    }
+
+    fun helios(ts: Int, random: Int = rand()): String {
         val ascii = digest("MD5", le32(random) + "8662".toByteArray()).hex().toByteArray()
         val words = (0..3).map { ascii.i64(it * 8, true) }.toMutableList()
         val table = mutableListOf(words[0])
@@ -548,8 +583,10 @@ internal class Signer(
     }
 
     companion object {
+        // 服务端按 Go url.Values.Encode() 的顺序校验签名，必须按 key 排序。
         fun encode(values: Map<String, String>) =
-            values.entries.joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
+            values.entries.sortedBy { it.key }
+                .joinToString("&") { (k, v) -> "${encode(k)}=${encode(v)}" }
 
         fun encode(value: String): String =
             URLEncoder.encode(value, "UTF-8").replace("+", "%20").replace("%7E", "~")
