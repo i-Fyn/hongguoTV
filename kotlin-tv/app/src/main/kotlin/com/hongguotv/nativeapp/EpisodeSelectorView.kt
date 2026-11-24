@@ -95,7 +95,7 @@ internal class EpisodeSelectorView(
             val row = LinearLayout(context)
             numbers.forEach { index ->
                 val cell = button("${index + 1}" + when {
-                    index == current -> "\n当前"
+                    index == current -> " 当前"
                     index == lastWatched -> if (lastCompleted) "\n已看" else "\n上次"
                     else -> ""
                 }, index == current) { onSelect(index) }.apply {

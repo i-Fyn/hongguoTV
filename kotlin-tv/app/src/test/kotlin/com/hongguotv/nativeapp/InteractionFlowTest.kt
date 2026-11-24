@@ -51,7 +51,7 @@ class InteractionFlowTest {
             panel.show(decor, anchor)
             assertEquals(2, decor.childCount)
             assertSame(menu, decor.getChildAt(0))
-            val current = texts(decor).single { it.text == "25\n当前" }
+            val current = texts(decor).single { it.text == "25 当前" }
             assertTrue(current.hasFocus())
             val cells = texts(decor).filter { it.tag?.toString()?.startsWith("episode-") == true && !it.tag.toString().startsWith("episode-group-") }
             assertEquals(20, cells.size)

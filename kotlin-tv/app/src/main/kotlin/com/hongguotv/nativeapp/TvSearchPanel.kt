@@ -148,7 +148,7 @@ internal class TvSearchPanel(
         orientation = VERTICAL
         addView(editor, LayoutParams(-1, -1))
         addView(resultStage, LayoutParams(-1, -1))
-        backButton = action("← 返回选词") { back() }
+        backButton = action("←") { back() }
         val resultHeader = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(12)) }
         resultHeader.addView(backButton, LayoutParams(-2, dp(46)).apply { rightMargin = dp(20) })
         resultHeader.addView(resultHeading, LayoutParams(0, -2, 1f))

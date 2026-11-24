@@ -159,7 +159,7 @@ class TvUsabilityTest {
             assertNotSame(play.parent, rows.first { it.text == "加入本机收藏" }.parent)
             assertEquals(2, rows.first { it.text.toString().startsWith("很长的简介") }.maxLines)
             assertEquals(1, get(activity, "group"))
-            val selected = texts(root).first { it.text == "25\n当前" }
+            val selected = texts(root).first { it.text == "25 当前" }
             assertTrue(selected.isSelected)
             assertTrue(rows.any { it.text == "跳转集数" })
             assertEquals("detail", get(activity, "screen"))

@@ -752,7 +752,7 @@ class MainActivity : Activity() {
     }
 
     // 创建页面公共容器；清除旧视图后设置边距，可按需添加标题和返回按钮。
-    private fun base(title: String? = null): LinearLayout {
+    private fun base(title: String? = null, centerHeading: Boolean = false): LinearLayout {
         catalogShell = null
         root.removeAllViews()
         root.background = TvVisual.backdrop(this)
@@ -763,10 +763,12 @@ class MainActivity : Activity() {
         root.addView(container, FrameLayout.LayoutParams(-1, -1))
         if (title != null) {
             val heading = row()
+            if (centerHeading) heading.gravity = Gravity.CENTER_HORIZONTAL
             addButton(heading, "‹ 返回") { goBack() }
             heading.addView(
                 text(title, 22f).apply { setTypeface(null, Typeface.BOLD) },
-                lp(0, dp(44)).apply { weight = 1f },
+                if (centerHeading) lp(-2, dp(44)).apply { leftMargin = dp(10) }
+                else lp(0, dp(44)).apply { weight = 1f },
             )
             container.addView(heading)
         }
@@ -2660,7 +2662,7 @@ class MainActivity : Activity() {
         releaseCatalogViews()
         screen = "detail"
         val data = detail ?: return showCatalog()
-        val body = base("剧集详情")
+        val body = base("剧集详情", centerHeading = true)
         val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         val content = column()
         scroll.addView(content)
@@ -2721,6 +2723,7 @@ class MainActivity : Activity() {
             }
         }
         producerButton.textSize = 13f
+        (producerButton.layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(10)
         producerButton.isEnabled = false
         val actions = row()
         actions.setPadding(0, dp(12), 0, 0)
