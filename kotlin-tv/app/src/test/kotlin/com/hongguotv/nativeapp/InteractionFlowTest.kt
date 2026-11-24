@@ -57,7 +57,7 @@ class InteractionFlowTest {
             assertEquals(20, cells.size)
             assertEquals(10, (cells.first().parent as ViewGroup).childCount)
             assertEquals(listOf("1–20", "21–40", "41–60", "61–65"), texts(decor).filter { it.tag?.toString()?.startsWith("episode-group-") == true }.map { it.text.toString() })
-            assertTrue(texts(decor).any { it.text == "23\n上次" })
+            assertTrue(texts(decor).any { it.text == "23 上次" })
             assertFalse(texts(decor).any { it.text == "跳转集数" })
             val lastGroup = decor.findViewWithTag<View>("episode-group-3")
             assertEquals(lastGroup.id, lastGroup.nextFocusRightId)
