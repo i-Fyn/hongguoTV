@@ -752,7 +752,7 @@ class MainActivity : Activity() {
     }
 
     // 创建页面公共容器；清除旧视图后设置边距，可按需添加标题和返回按钮。
-    private fun base(title: String? = null, centerHeading: Boolean = false): LinearLayout {
+    private fun base(title: String? = null): LinearLayout {
         catalogShell = null
         root.removeAllViews()
         root.background = TvVisual.backdrop(this)
@@ -762,13 +762,14 @@ class MainActivity : Activity() {
         container.setPadding(horizontal, vertical, horizontal, vertical)
         root.addView(container, FrameLayout.LayoutParams(-1, -1))
         if (title != null) {
-            val heading = row()
-            if (centerHeading) heading.gravity = Gravity.CENTER_HORIZONTAL
+            val heading = row().apply { gravity = Gravity.CENTER_VERTICAL }
             addButton(heading, "‹ 返回") { goBack() }
             heading.addView(
-                text(title, 22f).apply { setTypeface(null, Typeface.BOLD) },
-                if (centerHeading) lp(-2, dp(44)).apply { leftMargin = dp(10) }
-                else lp(0, dp(44)).apply { weight = 1f },
+                text(title, 22f).apply {
+                    setTypeface(null, Typeface.BOLD)
+                    gravity = Gravity.CENTER_VERTICAL
+                },
+                lp(0, dp(44)).apply { weight = 1f },
             )
             container.addView(heading)
         }
@@ -2662,7 +2663,7 @@ class MainActivity : Activity() {
         releaseCatalogViews()
         screen = "detail"
         val data = detail ?: return showCatalog()
-        val body = base("剧集详情", centerHeading = true)
+        val body = base("剧集详情")
         val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false }
         val content = column()
         scroll.addView(content)
