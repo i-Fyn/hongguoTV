@@ -95,8 +95,9 @@ class SearchPayloadTest {
         }.build())
         assertEquals("123",repo.searchAll("剧",type=ContentType.COMIC).items.single().id)
         assertEquals("456",repo.searchAll("剧",type=ContentType.SHORT).items.single().id)
+        // 模糊匹配的结果不因标题不含关键词而被清空。
         val unrelated = repo.searchAll("测试")
-        assertTrue(unrelated.items.isEmpty())
+        assertEquals(setOf("123", "456"), unrelated.items.map { it.id }.toSet())
         assertTrue(unrelated.hasMore)
     }
 }

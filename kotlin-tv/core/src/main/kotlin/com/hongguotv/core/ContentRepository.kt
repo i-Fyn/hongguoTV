@@ -615,7 +615,9 @@ constructor(
             type == null || genre == (if (type == ContentType.COMIC) "205" else "203") ||
                 (type == ContentType.SHORT && genre.isBlank())
         }
-        val items = SearchPayload.prioritize(valid(filtered.map(::card)), keyword)
+        val cards = valid(filtered.map(::card))
+        // 上游对联想词常返回模糊匹配（标题不含原词）；此时保留服务端结果，避免整页显示 0 部。
+        val items = SearchPayload.prioritize(cards, keyword).ifEmpty { cards }
         val more =
             when {
                 section.has("hasMore") -> section.optBoolean("hasMore")

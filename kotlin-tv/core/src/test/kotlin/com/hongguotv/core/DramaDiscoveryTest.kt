@@ -125,7 +125,7 @@ class DramaDiscoveryTest {
     }
 
     @Test
-    fun searchFiltersUnrelatedTitlesAndUsesSourceHasMore() {
+    fun searchKeepsFuzzyMatchesAndUsesSourceHasMore() {
         val http =
             OkHttpClient.Builder()
                 .addInterceptor { chain ->
@@ -151,7 +151,7 @@ class DramaDiscoveryTest {
                 }
                 .build()
         val result = ContentRepository(http).searchAll("测试")
-        assertTrue(result.items.isEmpty())
+        assertEquals("1", result.items.single().id)
         assertFalse(result.hasMore)
     }
 
