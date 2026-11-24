@@ -2,6 +2,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import crypto from "node:crypto";
 import axios from "axios";
+import { resolvePlayback } from "./playback.mjs";
 
 // Trusted, pinned GPL source. This is a compatibility wrapper, not a sandbox for user scripts.
 const source = fs.readFileSync(
@@ -29,6 +30,9 @@ vm.runInContext(
 );
 const api = context.api;
 const SITE = "https://hongguoduanju.com";
+// 播放模型改走 android v5 签名（旧 v3 接口现在返回 HTTP 200 + 空正文）。
+const playbackCache = new Map();
+const PLAYBACK_TTL = 300000;
 const card = (row) => ({
   id: String(row.url),
   title: row.title,
@@ -52,20 +56,36 @@ export const provider = {
     return { items: cards(pageData.recommendList.map(api.itemToCard)), page };
   },
   async search(keyword, page = 1) {
-    try {
-      const result = await api.appSearchPage(keyword, 11, page, 20);
-      if (result.list.length) return { items: cards(result.list), page };
-    } catch {
-      /* Website fallback; failure below remains an error, never an empty success. */
+    // 官网 SSR 搜索页已不再输出 _ROUTER_DATA；改用官网搜索接口（无需签名/注册）。
+    // 接口偶发限流/非 JSON 响应，失败后短暂等待重试一次。
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const response = await axios.get(
+          `${SITE}/api/search/result?aid=8662&query=${encodeURIComponent(keyword)}&page=${page}`,
+          {
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+              Referer: `${SITE}/`,
+              Accept: "application/json, text/plain, */*",
+              "Accept-Language": "zh-CN,zh;q=0.9",
+            },
+            timeout: 20000,
+            responseType: "json",
+          }
+        );
+        const data = response.data || {};
+        if (Number(data.code ?? 0) !== 0 || !Array.isArray(data.searchList))
+          throw new Error("搜索数据不可用");
+        return {
+          items: cards(data.searchList.map(api.itemToCard)),
+          page,
+        };
+      } catch (error) {
+        if (attempt > 0) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
     }
-    const data = await api.routerData(
-      `${SITE}/search/${encodeURIComponent(keyword)}?page=${page}`
-    );
-    const pageData =
-      data?.loaderData?.["search_(keyword)/page"] ||
-      data?.loaderData?.search_page;
-    if (!Array.isArray(pageData?.searchList)) throw new Error("搜索数据不可用");
-    return { items: cards(pageData.searchList.map(api.itemToCard)), page };
   },
   async detail(id) {
     const data = await api.routerData(`${SITE}/detail?series_id=${id}`);
@@ -85,11 +105,15 @@ export const provider = {
     return { ...card(api.itemToCard(series)), id, episodes };
   },
   async stream(id, fresh = false) {
-    if (fresh) {
-      api.streamCache.delete(`${id}|auto`);
-      api.videoInfoCache.delete(id);
+    if (fresh) playbackCache.delete(id);
+    let stream = playbackCache.get(id);
+    if (!stream || Date.now() - stream.time > PLAYBACK_TTL) {
+      stream = {
+        ...(await resolvePlayback(id, "auto")),
+        time: Date.now(),
+      };
+      playbackCache.set(id, stream);
     }
-    const stream = await api.resolveStream(id, "auto");
     const prepared = await api.prepareHeader(stream);
     return {
       total: prepared.total,
@@ -104,11 +128,10 @@ export const provider = {
   },
 };
 
-// Limit the pinned upstream's otherwise unbounded caches during long-lived home use.
+// Limit long-lived caches during home use.
 setInterval(() => {
   for (const cache of [
-    api.streamCache,
-    api.videoInfoCache,
+    playbackCache,
     api.pageCache,
     api.appSearchCache,
   ]) {
