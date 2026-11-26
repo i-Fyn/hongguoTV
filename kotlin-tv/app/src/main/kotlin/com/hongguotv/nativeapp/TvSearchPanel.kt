@@ -40,7 +40,6 @@ internal class TvSearchPanel(
     private var editingFocus: View? = null
     private val editor = LinearLayout(context)
     private val resultStage = LinearLayout(context).apply { orientation = VERTICAL; visibility = GONE }
-    private lateinit var backButton: TextView
     var showingResults = false
         private set
     fun capture() = EditState(input.text.toString(), suggestions.values(), suggestions.selectedIndex(), recents.indexOfFirst { it.hasFocus() }, lastKey)
@@ -58,7 +57,6 @@ internal class TvSearchPanel(
         showingResults = true
         editor.visibility = GONE
         resultStage.visibility = VISIBLE
-        backButton.requestFocus()
     }
     fun back(): Boolean {
         if (!showingResults) return false
@@ -71,7 +69,6 @@ internal class TvSearchPanel(
     }
     fun resultTitle(query: String) { resultHeading.text = "搜索 · $query" }
     private val resultHeading = label("搜索结果", 24f).apply { setTextColor(TvStyle.text); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }
-    fun resultBackEntry(): View = backButton
     val results = LinearLayout(context).apply { orientation = VERTICAL }
     private val keys = mutableListOf<TextView>()
     private val actions = mutableListOf<TextView>()
@@ -148,10 +145,8 @@ internal class TvSearchPanel(
         orientation = VERTICAL
         addView(editor, LayoutParams(-1, -1))
         addView(resultStage, LayoutParams(-1, -1))
-        backButton = action("←") { back() }
         val resultHeader = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, 0, dp(12)) }
-        resultHeader.addView(backButton, LayoutParams(-2, dp(46)).apply { rightMargin = dp(20) })
-        resultHeader.addView(resultHeading, LayoutParams(0, -2, 1f))
+        resultHeader.addView(resultHeading, LayoutParams(0, dp(46), 1f))
         resultStage.addView(resultHeader)
         resultStage.addView(results, LayoutParams(-1, 0, 1f))
         val compact = resources.configuration.screenWidthDp < 800
@@ -292,10 +287,9 @@ internal class TvSearchPanel(
 
     fun middleEntry(): View? = suggestions.entry() ?: recents.firstOrNull()?.takeIf { input.text.isBlank() }
 
-    fun entry(): View = if (showingResults) backButton else keys[lastKey]
+    fun entry(): View = if (showingResults) resultEntry() ?: input else keys[lastKey]
 
     fun updateNavigation() {
-        backButton.nextFocusDownId = resultEntry()?.id ?: backButton.id
         val right = middleEntry()?.id ?: input.id
         keys.forEachIndexed { i, key ->
             key.nextFocusLeftId = if (i % 6 == 0) upper.id else keys[i - 1].id

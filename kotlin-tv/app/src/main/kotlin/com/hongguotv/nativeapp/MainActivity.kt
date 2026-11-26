@@ -762,16 +762,13 @@ class MainActivity : Activity() {
         container.setPadding(horizontal, vertical, horizontal, vertical)
         root.addView(container, FrameLayout.LayoutParams(-1, -1))
         if (title != null) {
-            val heading = row().apply { gravity = Gravity.CENTER_VERTICAL }
-            addButton(heading, "‹ 返回") { goBack() }
-            heading.addView(
+            container.addView(
                 text(title, 22f).apply {
                     setTypeface(null, Typeface.BOLD)
                     gravity = Gravity.CENTER_VERTICAL
                 },
-                lp(0, dp(44)).apply { weight = 1f },
+                lp(-1, dp(44)),
             )
-            container.addView(heading)
         }
         return container
     }
@@ -1849,7 +1846,7 @@ class MainActivity : Activity() {
     ) {
         val requestQuery = query
         continuousKey = requestQuery
-        val upper = tvSearchPanel?.resultBackEntry() ?: searchInput ?: nav[tab]
+        val upper = if (tvSearchPanel != null) nav[tab] else searchInput ?: nav[tab]
         lateinit var browser: ContinuousCatalogView
         browser =
             ContinuousCatalogView(
@@ -1935,7 +1932,7 @@ class MainActivity : Activity() {
         searchSuggestions?.updateNavigation()
         tvSearchPanel?.let { panel ->
             panel.updateNavigation()
-            browser.setSideEntry(if (panel.showingResults) panel.resultBackEntry() else panel.middleEntry() ?: panel.entry())
+            browser.setSideEntry(if (panel.showingResults) null else panel.middleEntry() ?: panel.entry())
             nav.forEach { it.nextFocusDownId = panel.entry().id }
         }
         if (focusNav) nav[tab].requestFocus()
