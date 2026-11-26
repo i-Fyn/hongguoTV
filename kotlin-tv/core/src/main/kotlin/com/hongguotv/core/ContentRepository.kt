@@ -843,6 +843,7 @@ constructor(
 
     private fun fetchDetail(id: String): Detail {
         require(id.matches(Regex("[0-9]{1,30}")))
+        appDetail(id)?.let { return it }
         val o =
             router("$site/detail?series_id=$id")
                 .optJSONObject("detail_page")
@@ -856,6 +857,69 @@ constructor(
         )
             throw IOException("分集数据异常")
         return Detail(card(o).copy(id = id), episodes)
+    }
+
+    /**
+     * 官网详情页自 2026-11-24 起把 `vid_list` 换成 `v1_…` 保护 ID，网页入口不再返回可播放的分集。
+     * 改用官方 App 的详情接口 `/novel/player/video_detail/v1/`，返回的 `video_list[].vid`
+     * 仍是可直接请求播放模型的数字 ID；请求走注册设备签名（X-Gorgon/X-Argus/X-Ladon），不带 Cookie。
+     */
+    private fun appDetail(id: String): Detail? {
+        return try {
+            val identity = playbackSession.profile(http)
+            val deviceId = identity.values.getValue("device_id")
+            val now = clock()
+            val query = Signer.encode(
+                linkedMapOf(
+                    "aid" to "8662", "app_name" to "novelread",
+                    "version_code" to "73532", "version_name" to "7.3.5.32",
+                    "manifest_version_code" to "73532", "update_version_code" to "73532",
+                    "channel" to "update_64", "device_platform" to "android", "os" to "android",
+                    "ssmix" to "a", "device_type" to "25053RT47C", "device_brand" to "Redmi",
+                    "language" to "zh", "os_api" to "36", "os_version" to "16",
+                    "resolution" to "1280*2772", "dpi" to "520", "ac" to "wifi",
+                    "device_id" to deviceId,
+                    "iid" to identity.values.getValue("iid"),
+                    "_rticket" to now.toString(),
+                )
+            )
+            val body = """{"series_id":"$id"}""".toByteArray(Charsets.UTF_8)
+            val builder =
+                Request.Builder()
+                    .url("https://api5-normal-sinfonlineb.fqnovel.com/novel/player/video_detail/v1/?$query")
+                    .header("User-Agent", VendorConstants.VIDEO_UA.replace("/71332", "/73532"))
+                    .header("Accept", "application/json")
+                    .header("X-XS-From-Web", "0")
+                    .header("Sdk-Version", "2")
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            PlayerSignature().headers(query, body, deviceId, now)
+                .forEach { (key, value) -> builder.header(key, value) }
+            val response =
+                RequestScope.execute(http.newCall(builder.build())) { it.body?.string().orEmpty() }
+            val root = runCatching { JSONObject(response) }.getOrNull() ?: return null
+            if (root.optInt("code", root.optInt("Code", -1)) != 0) return null
+            val data = root.optJSONObject("data")?.optJSONObject("video_data") ?: return null
+            val returned = data.str("series_id").ifEmpty { data.str("series_id_str") }
+            if (returned.isNotEmpty() && returned != id) return null
+            val rows = data.optJSONArray("video_list") ?: return null
+            val episodes =
+                (0 until rows.length())
+                    .mapNotNull { index ->
+                        val row = rows.optJSONObject(index) ?: return@mapNotNull null
+                        val episode = row.optInt("vid_index", -1)
+                        val vid = row.str("vid")
+                        if (episode < 1 || !vid.matches(Regex("[0-9]{1,30}"))) null
+                        else episode to vid
+                    }
+                    .sortedBy { it.first }
+            if (episodes.isEmpty()) return null
+            if (episodes.map { it.first } != (1..episodes.size).toList()) return null
+            if (episodes.map { it.second }.distinct().size != episodes.size) return null
+            Detail(card(data).copy(id = id), episodes.map { it.second })
+        } catch (_: IOException) {
+            null
+        }
     }
 
     /**

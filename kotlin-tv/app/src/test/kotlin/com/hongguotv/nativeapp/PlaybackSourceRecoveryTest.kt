@@ -39,7 +39,7 @@ class PlaybackSourceRecoveryTest {
             val request = chain.request()
             val response = Response.Builder().request(request).protocol(Protocol.HTTP_1_1).message("fixture")
             when (request.url.encodedPath) {
-                "/novel/player/multi_video_model/preload/v1" -> {
+                "/novel/player/multi_video_model/player/v1" -> {
                     requests += "primary"
                     val model = if (primaryEmpty) "" else
                         """{"data":{"10101":{"video_model":{"video_list":[{"main_url":"https://cdn.example.test/episode.mp4","height":720,"codec_type":"h264"}]}}}}"""
@@ -78,9 +78,10 @@ class PlaybackSourceRecoveryTest {
             primaryEmpty = true
         }
 
-        fun assertWarmRecoveryRequests() {
+        // 签名 video_tab 空响应后还会再发一次无签名 video_tab，故空备份通常是两次。
+        fun assertWarmRecoveryRequests(backupCount: Int = 2) {
             assertEquals("primary", requests.first())
-            assertEquals(listOf("backup", "cdn"), requests.drop(1).sorted())
+            assertEquals(List(backupCount) { "backup" } + "cdn", requests.drop(1).sorted())
         }
     }
 
@@ -96,7 +97,7 @@ class PlaybackSourceRecoveryTest {
         fixture.requests.clear()
         val error = assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open(repo = playerRepository) }
         assertTrue(error.allPlaybackModelsEmpty)
-        assertEquals(listOf("primary", "backup"), fixture.requests)
+        assertEquals(listOf("primary", "backup", "backup"), fixture.requests)
     }
 
     @Test
@@ -107,7 +108,8 @@ class PlaybackSourceRecoveryTest {
             backupTimesOut = true
         }
         fixture.open().use { assertEquals(16L, it.video.total) }
-        fixture.assertWarmRecoveryRequests()
+        // 首次备份请求超时即中止，不再发无签名回退。
+        fixture.assertWarmRecoveryRequests(backupCount = 1)
     }
 
     @Test
@@ -126,7 +128,10 @@ class PlaybackSourceRecoveryTest {
         assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open("10102") }
         assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open(speculative = true) }
         assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open(quality = 480) }
-        assertEquals(listOf("primary", "backup", "primary", "primary", "backup"), fixture.requests)
+        assertEquals(
+            listOf("primary", "backup", "backup", "primary", "primary", "backup", "backup"),
+            fixture.requests,
+        )
     }
 
     @Test
@@ -139,7 +144,7 @@ class PlaybackSourceRecoveryTest {
 
         fixture.requests.clear()
         assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open() }
-        assertEquals(listOf("primary", "backup"), fixture.requests)
+        assertEquals(listOf("primary", "backup", "backup"), fixture.requests)
     }
 
     @Test
@@ -151,12 +156,13 @@ class PlaybackSourceRecoveryTest {
         }
         val error = assertThrows(PlaybackSourceException::class.java) { fixture.open() }
         assertEquals(403, error.upstreamCode)
-        fixture.assertWarmRecoveryRequests()
+        // 备份模型被明确拒绝（403）时直接失败，不发无签名回退。
+        fixture.assertWarmRecoveryRequests(backupCount = 1)
 
         fixture.backupWaitsForCdn = false
         fixture.backupStatus = 200
         fixture.requests.clear()
         assertThrows(EmptyPlaybackResponseException::class.java) { fixture.open() }
-        assertEquals(listOf("primary", "backup"), fixture.requests)
+        assertEquals(listOf("primary", "backup", "backup"), fixture.requests)
     }
 }

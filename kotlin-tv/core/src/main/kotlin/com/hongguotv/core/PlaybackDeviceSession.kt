@@ -280,8 +280,9 @@ private fun registerPlayback(http: OkHttpClient): DeviceRegister.Registered? {
     val transport = http.newBuilder().cookieJar(CookieJar.NO_COOKIES).build()
     return RequestScope.execute(transport.newCall(request)) { response ->
         val text = response.body?.string().orEmpty()
-        if (text.isBlank()) null
-        else DeviceRegister.parse(text, response.headers("Set-Cookie"))
+        // 空响应属于服务端软拦截，交给播放恢复预算重试，而不是直接判定注册失败。
+        if (text.isBlank()) throw EmptyPlaybackResponseException("stage=register")
+        DeviceRegister.parse(text, response.headers("Set-Cookie"))
     }
 }
 
